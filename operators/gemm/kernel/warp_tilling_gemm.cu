@@ -4,9 +4,9 @@ constexpr int TILE_SIZE = 32;
 constexpr int BLOCKS_ROWS = 8;
 constexpr int BLOCKS_COLS = 8;
 constexpr int NUM_THREADS = BLOCKS_ROWS * BLOCKS_COLS;
-constexpr int WORK_PRE_THREADS_ROWS = TILE_SIZE / BLOCKS_ROWS;
-constexpr int WORK_PRE_THREADS_COLS = TILE_SIZE / BLOCKS_COLS;
-constexpr int WORK_PER_THREADS = WORK_PRE_THREADS_ROWS * WORK_PRE_THREADS_COLS;
+constexpr int WORK_PER_THREADS_ROWS = TILE_SIZE / BLOCKS_ROWS;
+constexpr int WORK_PER_THREADS_COLS = TILE_SIZE / BLOCKS_COLS;
+constexpr int WORK_PER_THREADS = WORK_PER_THREADS_ROWS * WORK_PER_THREADS_COLS;
 
 __global__ void gemm_warp_tiling_f32_f32(
     const float* matrix_A,
@@ -29,7 +29,7 @@ __global__ void gemm_warp_tiling_f32_f32(
     const float* global_B_ptr = matrix_B + block_col * TILE_SIZE;
     float* global_C_ptr = matrix_C + block_row * N * TILE_SIZE + block_col * TILE_SIZE;
 
-    float local_sum[WORK_PRE_THREADS_ROWS][WORK_PRE_THREADS_COLS] = { 0.0f };
+    float local_sum[WORK_PER_THREADS_ROWS][WORK_PER_THREADS_COLS] = { 0.0f };
 
     for (int bkidx = 0; bkidx < K; bkidx += TILE_SIZE) {
 
@@ -42,8 +42,8 @@ __global__ void gemm_warp_tiling_f32_f32(
         }
         __syncthreads();
 
-        for (int Ty = 0; Ty < WORK_PRE_THREADS_ROWS; Ty++) {
-            for (int Tx = 0; Tx < WORK_PRE_THREADS_COLS; Tx++) {
+        for (int Ty = 0; Ty < WORK_PER_THREADS_ROWS; Ty++) {
+            for (int Tx = 0; Tx < WORK_PER_THREADS_COLS; Tx++) {
                 for (int k = 0; k < TILE_SIZE; k++) {
                     local_sum[Ty][Tx] += smem_A[ty + Ty * BLOCKS_ROWS][k] * smem_B[k][tx + Tx * BLOCKS_COLS];
                 }
@@ -54,8 +54,8 @@ __global__ void gemm_warp_tiling_f32_f32(
         global_B_ptr += TILE_SIZE * N;
     }
 
-    for (int Ty = 0; Ty < WORK_PRE_THREADS_ROWS; Ty++) {
-        for (int Tx = 0; Tx < WORK_PRE_THREADS_COLS; Tx++) {
+    for (int Ty = 0; Ty < WORK_PER_THREADS_ROWS; Ty++) {
+        for (int Tx = 0; Tx < WORK_PER_THREADS_COLS; Tx++) {
             global_C_ptr[(ty + Ty * BLOCKS_ROWS) * N + (tx + Tx * BLOCKS_COLS)] = local_sum[Ty][Tx];
         }
     }

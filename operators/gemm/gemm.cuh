@@ -33,3 +33,12 @@ void launch_gemm_warp_tiling_f32_f32(
     const int N,
     const int K
 );
+
+void launch_gemm_register_tilling_f32_f32(
+    const float* matrix_A,
+    const float* matrix_B,
+    float* matrix_C,
+    const int M,
+    const int N,
+    const int K
+);

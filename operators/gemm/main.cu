@@ -87,6 +87,15 @@ int main() {
     validate_result<float>(matrix_data);
 
     // ---------------------------------------------
+    launch_gemm_register_tilling_f32_f32(
+        matrix_data.matrix_A,
+        matrix_data.matrix_B,
+        matrix_data.matrix_C,
+        M, N, K
+    );
+    validate_result<float>(matrix_data);
+
+    // ---------------------------------------------
     cudaFree(matrix_data.matrix_A);
     cudaFree(matrix_data.matrix_B);
     cudaFree(matrix_data.matrix_C);
