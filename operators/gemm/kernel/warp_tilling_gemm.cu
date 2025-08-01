@@ -1,8 +1,8 @@
 #include "../gemm.cuh"
 
 constexpr int TILE_SIZE = 32;
-constexpr int BLOCKS_ROWS = 8;
-constexpr int BLOCKS_COLS = 8;
+constexpr int BLOCKS_ROWS = 16;
+constexpr int BLOCKS_COLS = 16;
 constexpr int NUM_THREADS = BLOCKS_ROWS * BLOCKS_COLS;
 constexpr int WORK_PER_THREADS_ROWS = TILE_SIZE / BLOCKS_ROWS;
 constexpr int WORK_PER_THREADS_COLS = TILE_SIZE / BLOCKS_COLS;

@@ -1,8 +1,8 @@
 #include "../gemm.cuh"
 
-constexpr int TILE_SIZE = 32;
-constexpr int BLOCK_ROWS = 8;
-constexpr int BLOCK_COLS = 8;
+constexpr int TILE_SIZE = 64;
+constexpr int BLOCK_ROWS = 16;
+constexpr int BLOCK_COLS = 16;
 constexpr int NUM_THREADS = BLOCK_COLS * BLOCK_ROWS;
 constexpr int WORK_PER_THREADS_ROWS = TILE_SIZE / BLOCK_ROWS;
 constexpr int WORK_PER_THREADS_COLS = TILE_SIZE / BLOCK_COLS;
@@ -31,7 +31,6 @@ __global__ void gemm_register_tilling_f32_f32(
     float* global_C_ptr = matrix_C + block_row * N * TILE_SIZE + block_col * TILE_SIZE;
 
     float local_sum[WORK_PER_THREADS_ROWS][WORK_PER_THREADS_COLS] = { 0.0f };
-
     // 加一个 float4 的搬运，可以搬运的更快
     // 逻辑:
     // 8 个线程搬运一行
@@ -41,6 +40,7 @@ __global__ void gemm_register_tilling_f32_f32(
 
     // 加载到 smemA 时进行转置，保证读取 smemA 的时候不会出现 bank conflict
     for (int bkidx = 0; bkidx < K; bkidx += TILE_SIZE) {
+
         for (int i = 0; i < WORK_PER_THREADS; ++i) {
             int offset = ty * BLOCK_COLS + tx;
             int r = (offset + i * NUM_THREADS) / TILE_SIZE;
@@ -50,28 +50,22 @@ __global__ void gemm_register_tilling_f32_f32(
         }
         __syncthreads();
 
-        float regA[WORK_PER_THREADS_ROWS][TILE_SIZE] = { 0.0f };
-        float regB[WORK_PER_THREADS_COLS][TILE_SIZE] = { 0.0f };
+        float reg_A[WORK_PER_THREADS_ROWS] = { 0.0f };
+        float reg_B[WORK_PER_THREADS_COLS] = { 0.0f };
 
-        // 使用向量化访存
-        for (int i = 0; i < WORK_PER_THREADS_ROWS; ++i) {
-            for (int k = 0; k < TILE_SIZE; ++k) {
-                regA[i][k] = smem_A[(ty + i * BLOCK_ROWS)][k];
+        #pragma unroll
+        for (int dotIdx = 0; dotIdx < TILE_SIZE; ++dotIdx) {
+            for (int i = 0; i < WORK_PER_THREADS_ROWS; i++) {
+                reg_A[i] = smem_A[ty + i * BLOCK_ROWS][dotIdx];
             }
-        }
-
-        // 使用向量化访存
-        for (int i = 0; i < WORK_PER_THREADS_COLS; ++i) {
-            for (int k = 0; k < TILE_SIZE; ++k) {
-                regB[i][k] = smem_B[k][(tx + i * BLOCK_COLS)];
+            
+            for (int i = 0; i < WORK_PER_THREADS_COLS; i++) {
+                reg_B[i] = smem_B[dotIdx][tx + i * BLOCK_ROWS];
             }
-        }
 
-        // 使用向量化乘加
-        for (int i = 0; i < WORK_PER_THREADS_ROWS; ++i) {
-            for (int j = 0; j < WORK_PER_THREADS_COLS; ++j) {
-                for (int k = 0; k < TILE_SIZE; k++) {
-                    local_sum[i][j] += regA[i][k] * regB[j][k];
+            for (int i = 0; i < WORK_PER_THREADS_ROWS; i++) {
+                for (int j = 0; j < WORK_PER_THREADS_COLS; j++) {
+                    local_sum[i][j] += reg_A[i] * reg_B[j];
                 }
             }
         }
@@ -80,7 +74,6 @@ __global__ void gemm_register_tilling_f32_f32(
         global_B_ptr += TILE_SIZE * N;
     }
 
-    // 使用向量化访存
     for (int i = 0; i < WORK_PER_THREADS_ROWS; ++i) {
         for (int j = 0; j < WORK_PER_THREADS_COLS; ++j) {
             global_C_ptr[(ty + i * BLOCK_ROWS) * N + (tx + j * BLOCK_COLS)] = local_sum[i][j];
