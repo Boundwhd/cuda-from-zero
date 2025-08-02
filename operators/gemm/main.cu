@@ -1,9 +1,9 @@
 #include <vector>
 #include "gemm.cuh"
 
-#define M 4096
-#define N 4096
-#define K 4096
+#define M 2048
+#define N 2048
+#define K 2048
 
 /*====== Device data ptr ======*/
 template<typename T>

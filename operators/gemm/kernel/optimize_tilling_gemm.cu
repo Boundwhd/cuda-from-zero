@@ -1,83 +1,89 @@
 #include "../gemm.cuh"
 
-constexpr int TILE_SIZE = 64;
-constexpr int BLOCK_ROWS = 16;
-constexpr int BLOCK_COLS = 16;
-constexpr int NUM_THREADS = BLOCK_COLS * BLOCK_ROWS;
-constexpr int WORK_PER_THREADS_ROWS = TILE_SIZE / BLOCK_ROWS;
-constexpr int WORK_PER_THREADS_COLS = TILE_SIZE / BLOCK_COLS;
-constexpr int WORK_PER_THREADS = (TILE_SIZE * TILE_SIZE) / (BLOCK_ROWS * BLOCK_COLS);
+constexpr int BM = 128;
+constexpr int BN = 128;
+constexpr int BK = 8;
+constexpr int TM = 8;
+constexpr int TN = 8;
+
+constexpr int BLOCK_ROWS = BM / TM;
+constexpr int BLOCK_COLS = BN / TN;
+constexpr int NUM_THREADS = BLOCK_ROWS * BLOCK_COLS;
 
 __global__ void gemm_optimize_tilling_f32_f32(
-    const float* __restrict__ matrix_A,
-    const float* __restrict__ matrix_B,
-    float* __restrict__ matrix_C,
+    const float*  matrix_A,
+    const float*  matrix_B,
+    float*  matrix_C,
     const int M,
     const int N,
     const int K
 ) {
-    const int ty = threadIdx.y;     // thread row   0 ... 16
-    const int tx = threadIdx.x;     // thread col   0 ... 16
+    const int block_row = blockIdx.x;
+    const int block_col = blockIdx.y;
 
-    const int block_row = blockIdx.y;   // block row
-    const int block_col = blockIdx.x;   // block col
+    const int ty = (threadIdx.x / BLOCK_COLS) * TM;
+    const int tx = (threadIdx.x % BLOCK_COLS) * TN;
 
-    __shared__ float __align__(16) smem_A[TILE_SIZE][TILE_SIZE];  // sram tile A  64 * 64
-    __shared__ float __align__(16) smem_B[TILE_SIZE][TILE_SIZE];  // sram tile B  64 * 64
+    __shared__  float smem_A[BK * BM];
+    __shared__  float smem_B[BK * BN];
 
-    const float* global_A_ptr = matrix_A + block_row * K * TILE_SIZE;
-    const float* global_B_ptr = matrix_B + block_col * TILE_SIZE;
-    float* global_C_ptr = matrix_C + block_row * N * TILE_SIZE + block_col * TILE_SIZE;
+    const int a_tile_row = threadIdx.x / (BK / 4);
+    const int a_tile_col = threadIdx.x % (BK / 4) * 4;
 
-    float local_sum[WORK_PER_THREADS_ROWS][WORK_PER_THREADS_COLS] = { 0.0f };
+    const int b_tile_row = threadIdx.x / (BN / 4);
+    const int b_tile_col = threadIdx.x % (BN / 4) * 4;
 
-    for (int bkIdx = 0; bkIdx < K; bkIdx += TILE_SIZE) {
-        int offset = ty * BLOCK_COLS + tx;  // 0 ... 255
-        for (int i = 0; i < WORK_PER_THREADS / 4; ++i) {
-            int r = (i * NUM_THREADS + offset) / (TILE_SIZE / 4);
-            int c = (i * NUM_THREADS + offset) % (TILE_SIZE / 4);
+    float ld_a_reg[4] = {0.};
 
-            float4 tmp_A = reinterpret_cast<const float4*>(&global_A_ptr[r * K + c * 4])[0];
-            smem_A[c * 4 + 0][r] = tmp_A.x;
-            smem_A[c * 4 + 1][r] = tmp_A.y;
-            smem_A[c * 4 + 2][r] = tmp_A.z;
-            smem_A[c * 4 + 2][r] = tmp_A.w;
+    float a_frag[TM];
+    float b_frag[TN];
+    float local_sum[TM][TN] = {0.};
+    
+    const float* global_A_ptr = matrix_A + block_row * K * BM;
+    const float* global_B_ptr = matrix_B + block_col * BN;
+    float* global_C_ptr = matrix_C + block_row * N * BM + block_col * BN;
 
-            reinterpret_cast<float4*>(&smem_B[r][c * 4])[0] = reinterpret_cast<const float4*>(&global_B_ptr[r * N + c * 4])[0];
-        }
+    #pragma unroll
+    for (int bkIdx = 0; bkIdx < K; bkIdx += BK) {
+        // load globalA to smemA
+        reinterpret_cast<float4*>(&ld_a_reg)[0] = reinterpret_cast<const float4*>(&global_A_ptr[a_tile_row * K + a_tile_col])[0];
+        smem_A[(a_tile_col + 0) * BM + a_tile_row] = ld_a_reg[0];
+        smem_A[(a_tile_col + 1) * BM + a_tile_row] = ld_a_reg[1];
+        smem_A[(a_tile_col + 2) * BM + a_tile_row] = ld_a_reg[2];
+        smem_A[(a_tile_col + 3) * BM + a_tile_row] = ld_a_reg[3];
+
+        // load globalB to smemB
+        reinterpret_cast<float4*>(&smem_B[b_tile_row * BN + b_tile_col])[0] = reinterpret_cast<const float4*>(&global_B_ptr[b_tile_row * N + b_tile_col])[0];
         __syncthreads();
 
-        float reg_A[WORK_PER_THREADS_ROWS] = { 0.0f };
-        float reg_B[WORK_PER_THREADS_COLS] = { 0.0f };
+        global_A_ptr += BK;
+        global_B_ptr += BK * N;
 
-        
-        for (int dotIdx = 0; dotIdx < TILE_SIZE; ++dotIdx) {
-            #pragma unroll
-            for (int i = 0; i < WORK_PER_THREADS_ROWS; i++) {
-                reg_A[i] = smem_A[dotIdx][ty + i * BLOCK_ROWS];
+        for (int i = 0; i < BK; i++) {
+            for (int m = 0; m < TM; m += 4) {
+                reinterpret_cast<float4*>(&a_frag[m])[0] = reinterpret_cast<float4*>(&smem_A[i * BM + ty + m])[0];
             }
 
-            #pragma unroll
-            for (int i = 0; i < WORK_PER_THREADS_COLS; i++) {
-                reg_B[i] = smem_B[dotIdx][tx + i * BLOCK_ROWS];
+            for (int n = 0; n < TN; n += 4) {
+                reinterpret_cast<float4*>(&b_frag[n])[0] = reinterpret_cast<float4*>(&smem_B[i * BN + tx + n])[0];
             }
 
-            #pragma unroll
-            for (int i = 0; i < WORK_PER_THREADS_ROWS; i++) {
-                for (int j = 0; j < WORK_PER_THREADS_COLS; j++) {
-                    local_sum[i][j] += reg_A[i] * reg_B[j];
+            for (int m = 0; m < TM; m++) {
+                for (int n = 0; n < TN; n++) {
+                    local_sum[m][n] += a_frag[m] * b_frag[n];
                 }
             }
         }
-
-        global_A_ptr += TILE_SIZE;
-        global_B_ptr += TILE_SIZE * N;
-
     }
 
-    for (int i = 0; i < WORK_PER_THREADS_ROWS; ++i) {
-        for (int j = 0; j < WORK_PER_THREADS_COLS; ++j) {
-            global_C_ptr[(ty + i * BLOCK_ROWS) * N + (tx + j * BLOCK_COLS)] = local_sum[i][j];
+    for (int m = 0; m < TM; m++) {
+        for (int n = 0; n < TN; n += 4) {
+            float4 ctmp = reinterpret_cast<float4*>(&global_C_ptr[(ty + m * N) + tx + n])[0];
+            ctmp.x = local_sum[m][n + 0];
+            ctmp.y = local_sum[m][n + 1];
+            ctmp.z = local_sum[m][n + 2];
+            ctmp.w = local_sum[m][n + 3];
+            reinterpret_cast<float4*>(&global_C_ptr[(ty + m) * N + tx + n])[0] = ctmp;
         }
     }
 }
@@ -90,9 +96,8 @@ void launch_gemm_optimize_tilling_f32_f32(
     const int N,
     const int K
 ) { 
-
-    dim3 block_size(BLOCK_ROWS, BLOCK_COLS);
-    dim3 grid_size(CEIL(N, TILE_SIZE), CEIL(M, TILE_SIZE));
+    dim3 grid_size(CEIL(M, BM), CEIL(N, BN), 1);
+    dim3 block_size(NUM_THREADS, 1, 1);
     cudaMemset(matrix_C, 0, sizeof(float) * M * N);
 
     cudaEvent_t start, stop;
