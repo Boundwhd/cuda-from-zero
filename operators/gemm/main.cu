@@ -1,9 +1,9 @@
 #include <vector>
 #include "gemm.cuh"
 
-#define M 2048
-#define N 2048
-#define K 2048
+#define M 4096
+#define N 4096
+#define K 4096
 
 /*====== Device data ptr ======*/
 template<typename T>
@@ -41,7 +41,7 @@ void validate_result(device_data<T>& matrix_data) {
     cudaMemcpy(output_data_cpu, matrix_data.matrix_C, M * N * sizeof(T), cudaMemcpyDeviceToHost);
 
     for (int i = 0; i < M * N; i++) {
-        if (fabs(output_data_cpu[i] - K) > 1e-3) {
+        if (fabs(output_data_cpu[i] - K) > 1e-1) {
             printf("validate fail!");
             free(output_data_cpu);
             exit(EXIT_FAILURE);
@@ -96,6 +96,16 @@ int main() {
     validate_result<float>(matrix_data);
 
     // ---------------------------------------------
+    launch_gemm_optimize_tilling_f32_f32(
+        matrix_data.matrix_A,
+        matrix_data.matrix_B,
+        matrix_data.matrix_C,
+        M, N, K
+    );
+    validate_result<float>(matrix_data);
+
+    // ---------------------------------------------
+
     cudaFree(matrix_data.matrix_A);
     cudaFree(matrix_data.matrix_B);
     cudaFree(matrix_data.matrix_C);

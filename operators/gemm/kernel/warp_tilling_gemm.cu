@@ -1,6 +1,6 @@
 #include "../gemm.cuh"
 
-constexpr int TILE_SIZE = 32;
+constexpr int TILE_SIZE = 64;
 constexpr int BLOCKS_ROWS = 16;
 constexpr int BLOCKS_COLS = 16;
 constexpr int NUM_THREADS = BLOCKS_ROWS * BLOCKS_COLS;
@@ -72,7 +72,8 @@ void launch_gemm_warp_tiling_f32_f32(
 
     dim3 block_size(BLOCKS_ROWS, BLOCKS_COLS);
     dim3 grid_size(CEIL(M, TILE_SIZE), CEIL(N, TILE_SIZE));
-
+    cudaMemset(matrix_C, 0, sizeof(float) * M * N);
+    
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);

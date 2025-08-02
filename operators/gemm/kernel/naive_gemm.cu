@@ -32,6 +32,7 @@ void launch_gemm_naive_f32_f32(
 ) {
     dim3 block_size(32, 32);
     dim3 grid_size(CEIL(N, 32), CEIL(M, 32));
+    cudaMemset(matrix_C, 0, sizeof(float) * M * N);
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);

@@ -57,7 +57,8 @@ void launch_gemm_shared_memory_f32_f32(
     
     dim3 block_size(BM * BN, 1, 1);
     dim3 grid_size(CEIL(N, BM), CEIL(M, BN));
-
+    cudaMemset(matrix_C, 0, sizeof(float) * M * N);
+    
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
