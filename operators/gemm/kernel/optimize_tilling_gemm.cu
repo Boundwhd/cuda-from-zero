@@ -60,14 +60,18 @@ __global__ void gemm_optimize_tilling_f32_f32(
         global_B_ptr += BK * N;
 
         for (int i = 0; i < BK; i++) {
+            
+            #pragma unroll
             for (int m = 0; m < TM; m += 4) {
                 reinterpret_cast<float4*>(&a_frag[m])[0] = reinterpret_cast<float4*>(&smem_A[i * BM + ty + m])[0];
             }
 
+            #pragma unroll
             for (int n = 0; n < TN; n += 4) {
                 reinterpret_cast<float4*>(&b_frag[n])[0] = reinterpret_cast<float4*>(&smem_B[i * BN + tx + n])[0];
             }
 
+            #pragma unroll
             for (int m = 0; m < TM; m++) {
                 for (int n = 0; n < TN; n++) {
                     local_sum[m][n] += a_frag[m] * b_frag[n];

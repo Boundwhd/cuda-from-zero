@@ -31,14 +31,7 @@ __global__ void gemm_register_tilling_f32_f32(
     float* global_C_ptr = matrix_C + block_row * N * TILE_SIZE + block_col * TILE_SIZE;
 
     float local_sum[WORK_PER_THREADS_ROWS][WORK_PER_THREADS_COLS] = { 0.0f };
-    // 加一个 float4 的搬运，可以搬运的更快
-    // 逻辑:
-    // 8 个线程搬运一行
-    // 一个 warp 搬运 4 行
-    // 两个 warp 搬运 8 行
-    // 需要 32 / 8 = 4 躺搬运完毕
-
-    // 加载到 smemA 时进行转置，保证读取 smemA 的时候不会出现 bank conflict
+    
     for (int bkidx = 0; bkidx < K; bkidx += TILE_SIZE) {
 
         for (int i = 0; i < WORK_PER_THREADS; ++i) {
