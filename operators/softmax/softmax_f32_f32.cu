@@ -2,6 +2,7 @@
 #include <iostream>
 #include <vector>
 #include <random>
+#include <chrono>
 #include <cmath>
 /**
  * A = [M, N] 
@@ -84,32 +85,25 @@ template<const int warp_per_block = 4>
 __global__ void softmax_f32_f32_optimize(float* A, int M, int N, float* B) {
     int lane_id = threadIdx.x % 32;
     int warp_id = threadIdx.x / 32;
-
     int row = blockIdx.x * warp_per_block + warp_id;
 
-    extern __shared__ float s_row[];  // 每个 block 有 warp_per_block 行的空间
-    if (row < M) {
-        float* s_data = s_row + warp_id * N;  // 每个 warp 用自己的一行
+    extern __shared__ float s_row[];
 
-        // 每个 warp 加载自己那一行
-        for (int i = lane_id; i < N; i += 32) {
-            s_data[i] = expf(A[row * N + i]);
-        }
-        __syncthreads();  // ✅ 等待所有 warp 加载完成
+    for (int i = lane_id; i < N; i += 32) {
+        s_row[warp_id * N + i] = expf(A[row * N + i]);
+    }
 
-        // 求和
-        float sum = 0.0f;
-        for (int i = lane_id; i < N; i += 32) {
-            sum += s_data[i];
-        }
-        for (int offset = 16; offset >= 1; offset >>= 1) {
-            sum += __shfl_xor_sync(0xffffffff, sum, offset);
-        }
+    float sum = 0.0f;
+    for (int i = lane_id; i < N; i += 32) {
+        sum += s_row[warp_id * N + i];
+    }
 
-        // 写出结果
-        for (int i = lane_id; i < N; i += 32) {
-            B[row * N + i] = s_data[i] / sum;
-        }
+    for (int offset = 16; offset >= 1; offset >>= 1) {
+        sum += __shfl_xor_sync(0xffffffff, sum, offset);
+    }
+
+    for (int i = lane_id; i < N; i += 32) {
+        B[row * N + i] = s_row[warp_id * N + i] / sum;
     }
 } 
 
@@ -118,13 +112,15 @@ void launch_softmax_f32_f32_optimize(float* A, int M, int N, float* B) {
     int grid_size = CEIL(M, warp_per_block);
     int block_size = warp_per_block * 32;
 
+    size_t shared_mem_size = warp_per_block * N * sizeof(float);
+
     cudaEvent_t start, stop;
 
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start);
 
-    softmax_f32_f32_optimize<warp_per_block><<<grid_size, block_size, warp_per_block * N, 0>>>(A, M, N, B);
+    softmax_f32_f32_optimize<warp_per_block><<<grid_size, block_size, shared_mem_size, 0>>>(A, M, N, B);
 
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
@@ -140,7 +136,7 @@ void launch_softmax_f32_f32_optimize(float* A, int M, int N, float* B) {
 
 int main(int argc, char* argv[]) {
     if (argc != 3) {
-        std::cerr << "example: " << argv[0] << " M N" << std::endl;
+        std::cerr << "example: " << argv[0] << " 1024 1024" << std::endl;
         return 1;
     }
     
@@ -157,8 +153,13 @@ int main(int argc, char* argv[]) {
         A[i] = dist(gen);
     }
 
+    auto start = std::chrono::high_resolution_clock::now();
     softmax(A, M, N, B);
-    std::cout << B[10] << " " << B[500] << " " << B[1000] << std::endl;
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "CPU Softmax execution time: " << duration.count() / 1000.0 << " ms" << std::endl;
+
+    std::cout << "Check result: " << B[10] << " " << B[500] << " " << B[1000] << std::endl;
 
     float* A_D;
     float* B_D;
@@ -168,12 +169,11 @@ int main(int argc, char* argv[]) {
     cudaMemcpy(A_D, A, sizeof(float) * M * N, cudaMemcpyHostToDevice);
     launch_softmax_f32_f32_naive(A_D, M, N, B_D);
     cudaMemcpy(B, B_D, sizeof(float) * M * N, cudaMemcpyDeviceToHost);
-    std::cout << B[10] << " " << B[500] << " " << B[1000] << std::endl;
+    std::cout << "Check result: " << B[10] << " " << B[500] << " " << B[1000] << std::endl;
 
-    cudaMemset(B_D, 0, sizeof(float) * M * N);
     launch_softmax_f32_f32_optimize(A_D, M, N, B_D);
     cudaMemcpy(B, B_D, sizeof(float) * M * N, cudaMemcpyDeviceToHost);
-    std::cout << B[10] << " " << B[500] << " " << B[1000] << std::endl;
+    std::cout << "Check result: " << B[10] << " " << B[500] << " " << B[1000] << std::endl;
 
     delete(A);
     delete(B);
