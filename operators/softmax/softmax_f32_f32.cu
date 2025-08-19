@@ -80,7 +80,7 @@ void launch_softmax_f32_f32_naive(float* A, int M, int N, float* B) {
     cudaEventDestroy(stop);
 }
 
-// optimize
+// optimize with shared memory
 template<const int warp_per_block = 4>
 __global__ void softmax_f32_f32_optimize(float* A, int M, int N, float* B) {
     int lane_id = threadIdx.x % 32;
@@ -165,8 +165,8 @@ int main(int argc, char* argv[]) {
     float* B_D;
     cudaMalloc(&A_D, sizeof(float) * M * N);
     cudaMalloc(&B_D, sizeof(float) * M * N);
-    
     cudaMemcpy(A_D, A, sizeof(float) * M * N, cudaMemcpyHostToDevice);
+    
     launch_softmax_f32_f32_naive(A_D, M, N, B_D);
     cudaMemcpy(B, B_D, sizeof(float) * M * N, cudaMemcpyDeviceToHost);
     std::cout << "Check result: " << B[10] << " " << B[500] << " " << B[1000] << std::endl;
