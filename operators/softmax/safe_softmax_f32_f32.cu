@@ -53,7 +53,6 @@ __global__ void safe_softmax_f32_f32_naive(const float* __restrict__ A, int M, i
     int row = blockIdx.x * warp_per_block + warp_id;
     if (row >= M) return;
 
-    // pass 1: max
     float v_max = -FLT_MAX;
     for (int i = lane_id; i < N; i += 32) {
         v_max = fmaxf(v_max, A[row * N + i]);
@@ -62,7 +61,6 @@ __global__ void safe_softmax_f32_f32_naive(const float* __restrict__ A, int M, i
         v_max = fmaxf(v_max, __shfl_xor_sync(0xffffffff, v_max, off));
     }
 
-    // pass 2: sum
     float sum = 0.0f;
     for (int i = lane_id; i < N; i += 32) {
         sum += __expf(A[row * N + i] - v_max);
@@ -71,7 +69,6 @@ __global__ void safe_softmax_f32_f32_naive(const float* __restrict__ A, int M, i
         sum += __shfl_xor_sync(0xffffffff, sum, off);
     }
 
-    // write
     float inv = 1.0f / sum;
     for (int i = lane_id; i < N; i += 32) {
         B[row * N + i] = __expf(A[row * N + i] - v_max) * inv;
@@ -90,13 +87,11 @@ __global__ void safe_softmax_f32_f32_optimize(const float* __restrict__ A, int M
     extern __shared__ float s_row[];
     float* s_this = s_row + warp_id * N;
 
-    // load whole row to smem
     for (int i = lane_id; i < N; i += 32) {
         s_this[i] = A[row * N + i];
     }
     __syncwarp();
 
-    // pass 1: max (from smem)
     float v_max = -FLT_MAX;
     for (int i = lane_id; i < N; i += 32) {
         v_max = fmaxf(v_max, s_this[i]);
@@ -105,7 +100,6 @@ __global__ void safe_softmax_f32_f32_optimize(const float* __restrict__ A, int M
         v_max = fmaxf(v_max, __shfl_xor_sync(0xffffffff, v_max, off));
     }
 
-    // pass 2: sum (also stash exp into smem to reuse)
     float sum = 0.0f;
     for (int i = lane_id; i < N; i += 32) {
         float e = __expf(s_this[i] - v_max);
@@ -122,7 +116,6 @@ __global__ void safe_softmax_f32_f32_optimize(const float* __restrict__ A, int M
     }
 }
 
-// online safe softmax (single pass per-thread, warp reduces (m,d))
 struct MD { float m, d; };
 
 template<const int warp_per_block = 4>
