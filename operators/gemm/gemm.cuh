@@ -2,51 +2,32 @@
 
 #include <cuda_runtime.h>
 #include <iostream>
-#include <cuda_fp16.h>
 #include <assert.h>
 
-#define CEIL(a, b) (a + b - 1) / b
+#define CEIL(a, b) (((a) + (b) - 1) / (b))
 
-void launch_gemm_naive_f32_f32(
-    const float* matrix_A,
-    const float* matrix_B,
-    float* matrix_C,
+void launch_gemm_f32_f32_v1(
+    const float* __restrict__ A,
+    const float* __restrict__ B,
+    float* __restrict__ C,
     const int M,
     const int N,
     const int K
 );
 
-void launch_gemm_shared_memory_f32_f32(
-    const float* matrix_A,
-    const float* matrix_B,
-    float* matrix_C,
+void launch_gemm_f32_f32_v2(
+    const float* __restrict__ A,
+    const float* __restrict__ B,
+    float* __restrict__ C,
     const int M,
     const int N,
     const int K
 );
 
-void launch_gemm_warp_tiling_f32_f32(
-    const float* matrix_A,
-    const float* matrix_B,
-    float* matrix_C,
-    const int M,
-    const int N,
-    const int K
-);
-
-void launch_gemm_register_tilling_f32_f32(
-    const float* matrix_A,
-    const float* matrix_B,
-    float* matrix_C,
-    const int M,
-    const int N,
-    const int K
-);
-
-void launch_gemm_optimize_tilling_f32_f32(
-    const float* matrix_A,
-    const float* matrix_B,
-    float* matrix_C,
+void launch_gemm_f32_f32_v3(
+    const float* __restrict__ A,
+    const float* __restrict__ B,
+    float* __restrict__ C,
     const int M,
     const int N,
     const int K
